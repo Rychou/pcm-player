@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>PCM 音频播放器</title>
+    <style>
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .canvas-container {
+            position: relative;
+            margin: 20px 0;
+        }
+        canvas {
+            width: 100%;
+            height: 300px;
+            border: 1px solid #ccc;
+            padding: 40px;
+            box-sizing: border-box;
+        }
+        .spectrum-canvas {
+            border-top: none;
+            height: 250px;
+        }
+        .controls {
+            margin: 20px 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .settings {
+            margin: 10px 0;
+        }
+        .duration-display, .stats-display {
+            margin: 10px 0;
+            font-size: 14px;
+            color: #666;
+        }
+        .volume-display {
+            margin: 10px 0;
+            padding: 5px 10px;
+            font-size: 14px;
+            color: white;
+            background: #2196F3;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+        }
+        .zoom-controls {
+            display: flex;
+            gap: 5px;
+        }
+        .stats-panel {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f5f5f5;
+            border-radius: 4px;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 10px;
+        }
+        .stat-item {
+            padding: 8px;
+            background: white;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        button {
+            padding: 5px 10px;
+            border: none;
+            border-radius: 4px;
+            background: #2196F3;
+            color: white;
+            cursor: pointer;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        button:hover:not(:disabled) {
+            background: #1976D2;
+        }
+        .selection-controls {
+            margin-top: 10px;
+        }
+        .progress-container {
+            margin: 10px 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .progress-bar {
+            flex: 1;
+            height: 10px;
+            background: #eee;
+            border-radius: 5px;
+            cursor: pointer;
+            position: relative;
+        }
+        .progress-current {
+            position: absolute;
+            left: 0;
+            top: 0;
+            height: 100%;
+            background: #2196F3;
+            border-radius: 5px;
+            width: 0%;
+        }
+        .time-display {
+            font-size: 14px;
+            color: #666;
+            min-width: 160px;
+            text-align: right;
+        }
+        .drop-zone {
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            background: #f8f8f8;
+            transition: all 0.3s ease;
+            margin-bottom: 20px;
+        }
+        .drop-zone.drag-over {
+            border-color: #2196F3;
+            background: #e3f2fd;
+        }
+        .drop-zone p {
+            margin: 0;
+            color: #666;
+        }
+        .frame-controls {
+            display: flex;
+            gap: 5px;
+        }
+        .canvas-title {
+            position: absolute;
+            left: 10px;
+            font-size: 14px;
+            color: #666;
+            padding: 5px;
+        }
+        .waveform-title {
+            top: 5px;
+        }
+        .spectrum-title {
+            top: 305px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>PCM 音频播放器</h1>
+        <div class="drop-zone">
+            <p>将 PCM 文件拖放到此处</p>
+            <p>或</p>
+            <p>点击选择文件</p>
+        </div>
+        <div class="settings">
+            <label>采样率：
+                <select id="sampleRate">
+                    <option value="48000" selected>48000 Hz</option>
+                    <option value="44100">44100 Hz</option>
+                    <option value="16000">16000 Hz</option>
+                </select>
+            </label>
+            <label>位深度：
+                <select id="bitDepth">
+                    <option value="32" selected>32 bit float</option>
+                    <option value="16">16 bit</option>
+                    <option value="8">8 bit</option>
+                </select>
+            </label>
+            <label>字节序：
+                <select id="endian">
+                    <option value="little" selected>小端序 (Little Endian)</option>
+                    <option value="big">大端序 (Big Endian)</option>
+                </select>
+            </label>
+        </div>
+        <div class="controls">
+            <input type="file" id="fileInput" accept=".pcm">
+            <button id="playButton" disabled>播放</button>
+            <button id="stopButton" disabled>停止</button>
+            <div class="zoom-controls">
+                <button id="zoomInButton" disabled>放大</button>
+                <button id="zoomOutButton" disabled>缩小</button>
+            </div>
+            <button id="exportButton" disabled>导出选区</button>
+        </div>
+        <div class="progress-container">
+            <div class="progress-bar">
+                <div class="progress-current"></div>
+            </div>
+            <div class="time-display">
+                <span class="current-time">00:00.000</span>
+                /
+                <span class="total-time">00:00.000</span>
+            </div>
+        </div>
+        <div class="canvas-container">
+            <div class="canvas-title waveform-title">波形图</div>
+            <canvas id="waveformCanvas"></canvas>
+            <div class="canvas-title spectrum-title">频谱图</div>
+            <canvas id="spectrumCanvas" class="spectrum-canvas"></canvas>
+        </div>
+        <div class="stats-panel">
+            <h3>音频统计信息</h3>
+            <div class="stats-grid">
+                <div class="stat-item" id="peakLevel">峰值电平: --</div>
+                <div class="stat-item" id="rmsLevel">RMS电平: --</div>
+                <div class="stat-item" id="dcOffset">直流偏置: --</div>
+                <div class="stat-item" id="crestFactor">波峰因数: --</div>
+                <div class="stat-item" id="zeroCrossings">过零率: --</div>
+            </div>
+        </div>
+    </div>
+    <script src="pcm-player.js"></script>
+</body>
+</html> 
