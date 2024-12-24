@@ -35,6 +35,23 @@ class PCMPlayer {
         
         // 添加帧控制按钮
         this.createFrameControls();
+        
+        // 添加缩放动画相关状态
+        this.zoomAnimation = {
+            start: 1,
+            end: 1,
+            startTime: 0,
+            duration: 300, // 动画持续时间（毫秒）
+            isAnimating: false
+        };
+        
+        // 添加缩放比例显示
+        this.zoomDisplay = document.createElement('div');
+        this.zoomDisplay.className = 'zoom-display';
+        controls.appendChild(this.zoomDisplay);
+        
+        // 添加双击事件监听
+        this.waveformCanvas.addEventListener('dblclick', this.handleDoubleClick.bind(this));
     }
 
     initializeElements() {
@@ -678,7 +695,7 @@ class PCMPlayer {
         }
     }
 
-    // 新增：计算合适的时间间隔
+    // 新增：计算合适的时��间隔
     calculateTimeInterval(duration) {
         const baseIntervals = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5];
         const targetSteps = 10; // 期望的刻度数量
@@ -1065,27 +1082,90 @@ class PCMPlayer {
         // 计算鼠标位置对应的时间点
         const mouseTime = viewStartTime + (mouseX / effectiveWidth) * (duration / this.zoomLevel);
         
-        // 计算新的缩放级别
-        const zoomDelta = e.deltaY > 0 ? 0.9 : 1.1;
-        const newZoom = Math.max(1, Math.min(50, this.zoomLevel * zoomDelta));
+        // 优化缩放灵敏度
+        const zoomFactor = Math.pow(1.1, -Math.sign(e.deltaY));
+        const targetZoom = Math.max(1, Math.min(50, this.zoomLevel * zoomFactor));
         
-        if (newZoom !== this.zoomLevel) {
+        // 如果缩放级别发生变化，启动动画
+        if (targetZoom !== this.zoomLevel) {
+            this.animateZoom(targetZoom, mouseTime);
+        }
+    }
+
+    // 添加缩放动画方法
+    animateZoom(targetZoom, fixedTimePoint) {
+        // 如果已经在动画中，取消之前的动画
+        if (this.zoomAnimation.isAnimating) {
+            cancelAnimationFrame(this.zoomAnimationFrame);
+        }
+        
+        this.zoomAnimation = {
+            start: this.zoomLevel,
+            end: targetZoom,
+            startTime: performance.now(),
+            duration: 300,
+            isAnimating: true
+        };
+        
+        const animate = (currentTime) => {
+            if (!this.zoomAnimation.isAnimating) return;
+            
+            const elapsed = currentTime - this.zoomAnimation.startTime;
+            const progress = Math.min(elapsed / this.zoomAnimation.duration, 1);
+            
+            // 使用 easeOutCubic 缓动函数
+            const easeProgress = 1 - Math.pow(1 - progress, 3);
+            
+            const newZoom = this.zoomAnimation.start + (this.zoomAnimation.end - this.zoomAnimation.start) * easeProgress;
             this.zoomLevel = newZoom;
             
-            // 计算新的像素/秒比率
-            const newPixelsPerSecond = effectiveWidth * this.zoomLevel / duration;
-            
-            // 计算新的偏移量，保持鼠标位置对应的时间点不变
-            const targetX = mouseX;
-            const newOffset = (mouseTime - targetX / newPixelsPerSecond) * newPixelsPerSecond;
+            // 更新偏移量以保持固定点不变
+            const effectiveWidth = this.waveformCanvas.width - 80;
+            const duration = this.audioBuffer.duration;
+            const pixelsPerSecond = effectiveWidth * newZoom / duration;
+            const newOffset = (fixedTimePoint - (effectiveWidth / pixelsPerSecond / 2)) * pixelsPerSecond;
             
             // 限制偏移量范围
-            const maxOffset = effectiveWidth * (this.zoomLevel - 1);
-            this.offset = Math.max(0, Math.min(maxOffset, newOffset));
+            this.offset = Math.max(0, Math.min(effectiveWidth * (newZoom - 1), newOffset));
             
-            // 重绘波形
+            // 更新显示
             this.drawWaveform(this.audioBuffer.getChannelData(0));
-        }
+            this.updateZoomDisplay();
+            
+            if (progress < 1) {
+                this.zoomAnimationFrame = requestAnimationFrame(animate);
+            } else {
+                this.zoomAnimation.isAnimating = false;
+            }
+        };
+        
+        this.zoomAnimationFrame = requestAnimationFrame(animate);
+    }
+
+    // 添加双击处理方法
+    handleDoubleClick(e) {
+        if (!this.audioBuffer) return;
+        
+        const padding = 40;
+        const rect = e.target.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left - padding;
+        const effectiveWidth = rect.width - 2 * padding;
+        
+        // 计算双击位置对应的时间点
+        const duration = this.audioBuffer.duration;
+        const pixelsPerSecond = effectiveWidth * this.zoomLevel / duration;
+        const viewStartTime = this.offset / pixelsPerSecond;
+        const clickTime = viewStartTime + (mouseX / effectiveWidth) * (duration / this.zoomLevel);
+        
+        // 重置到原始缩放级别
+        this.animateZoom(1, clickTime);
+    }
+
+    // 添加缩放比例显示更新方法
+    updateZoomDisplay() {
+        const percentage = Math.round((this.zoomLevel - 1) * 100);
+        this.zoomDisplay.textContent = `缩放: ${percentage}%`;
+        this.zoomDisplay.style.opacity = percentage > 0 ? '1' : '0';
     }
 
     // 处理拖动开始
