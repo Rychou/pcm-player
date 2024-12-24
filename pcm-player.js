@@ -306,7 +306,7 @@ class PCMPlayer {
                 `检测到异常采样值：\n` +
                 `- 位深度：${options.bitDepth} bit\n` +
                 `- 有效值范围：${-maxValue} 到 ${maxValue}\n` +
-                `- 发现 ${invalidSamples.length} 个超出范围��样本\n` +
+                `- 发现 ${invalidSamples.length} 个超出范围的样本\n` +
                 `- 前5个异常样本：\n${sampleDetails}\n` +
                 `可能原因：\n` +
                 `1. 文件格式可能不是原始PCM\n` +
@@ -379,7 +379,7 @@ class PCMPlayer {
         this.audioSource.buffer = this.audioBuffer;
         this.audioSource.connect(this.analyser);
         
-        // 添加播放结束事件监听
+        // 添加播放结束事件���听
         this.audioSource.onended = this.onPlaybackEnd;
         
         // 从暂停位置开始播放
@@ -590,31 +590,68 @@ class PCMPlayer {
         const duration = this.audioBuffer.duration;
         const pixelsPerSecond = effectiveWidth * this.zoomLevel / duration;
         
-        // 计算起始和结束采样点
-        const startSample = Math.floor((this.offset / pixelsPerSecond) * this.audioBuffer.sampleRate);
-        const endSample = Math.floor(((this.offset + effectiveWidth) / pixelsPerSecond) * this.audioBuffer.sampleRate);
+        // 计算起始和结束采样点，确保不超出数据范围
+        const startSample = Math.max(0, Math.floor((this.offset / pixelsPerSecond) * this.audioBuffer.sampleRate));
+        const endSample = Math.min(
+            dataArray.length,
+            Math.floor(((this.offset + effectiveWidth) / pixelsPerSecond) * this.audioBuffer.sampleRate)
+        );
         
-        // 绘制波形
+        // 如果没有可见的数据，直接返回
+        if (startSample >= endSample || startSample >= dataArray.length) {
+            return;
+        }
+        
+        // 计算每个像素对应的采样点数
+        const samplesPerPixel = Math.ceil((endSample - startSample) / effectiveWidth);
+        
+        // 开始绘制波形
         ctx.beginPath();
         ctx.strokeStyle = '#2196F3';
         ctx.lineWidth = 1;
         
-        // 计算每个采样点对应的x坐标
-        const samplesInView = endSample - startSample;
-        const pixelsPerSample = effectiveWidth / samplesInView;
+        let x = padding;
+        let isFirstPoint = true;
         
-        // 绘制所有可见的采样点
-        for (let i = startSample; i < endSample; i++) {
-            if (i >= 0 && i < dataArray.length) {
-                const value = dataArray[i];
-                const x = padding + (i - startSample) * pixelsPerSample;
-                const y = middleY + (value * (height - 2 * padding) / 2);
-                
-                if (i === startSample) {
-                    ctx.moveTo(x, y);
-                } else {
-                    ctx.lineTo(x, y);
+        // 使用块处理方式
+        const blockSize = Math.max(1, Math.floor(samplesPerPixel));
+        
+        for (let i = startSample; i < endSample; i += blockSize) {
+            // 在每个块中找到最大值和最小值
+            let maxValue = -1;
+            let minValue = 1;
+            let hasValidData = false;
+            
+            const blockEnd = Math.min(i + blockSize, endSample);
+            for (let j = i; j < blockEnd; j++) {
+                if (j < dataArray.length) {
+                    const value = dataArray[j];
+                    if (!isNaN(value) && isFinite(value)) {
+                        maxValue = Math.max(maxValue, value);
+                        minValue = Math.min(minValue, value);
+                        hasValidData = true;
+                    }
                 }
+            }
+            
+            // 只在有有效数据时绘制
+            if (hasValidData) {
+                // 计算当前块的x坐标
+                x = padding + ((i - startSample) / (endSample - startSample)) * effectiveWidth;
+                
+                // 绘制从最小值到最大值的线段
+                const maxY = middleY + (maxValue * (height - 2 * padding) / 2);
+                const minY = middleY + (minValue * (height - 2 * padding) / 2);
+                
+                if (isFirstPoint) {
+                    ctx.moveTo(x, maxY);
+                    isFirstPoint = false;
+                } else {
+                    ctx.lineTo(x, maxY);
+                }
+                
+                // 绘制垂直线段
+                ctx.lineTo(x, minY);
             }
         }
         
@@ -834,7 +871,7 @@ class PCMPlayer {
         const viewStartTime = this.offset / pixelsPerSecond;
         const viewCenterTime = viewStartTime + (duration / oldZoom / 2);
         
-        // 用新的缩放级别计算偏移量
+        // ��新的缩放级别计算偏移量
         const newPixelsPerSecond = effectiveWidth * this.zoomLevel / duration;
         const newOffset = (viewCenterTime - (duration / this.zoomLevel / 2)) * newPixelsPerSecond;
         
@@ -899,7 +936,7 @@ class PCMPlayer {
 
     handleSelectionEnd() {
         if (this.selection.isSelecting && this.hasValidSelection()) {
-            // 如果有有效选区，直接放大
+            // 如果有有��选区，直接放大
             this.zoomToSelection();
         }
         this.selection.isSelecting = false;
@@ -1053,7 +1090,7 @@ class PCMPlayer {
         
         // 检查文件类型（可选）
         if (!file.name.toLowerCase().endsWith('.pcm')) {
-            alert('请选择 PCM ���件');
+            alert('请选择 PCM 文件');
             return;
         }
         
