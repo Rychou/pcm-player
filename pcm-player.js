@@ -52,6 +52,15 @@ class PCMPlayer {
         
         // 添加双击事件监听
         this.waveformCanvas.addEventListener('dblclick', this.handleDoubleClick.bind(this));
+        
+        // 扩展选择状态
+        this.selection = {
+            start: 0,
+            end: 0,
+            startTime: 0,
+            endTime: 0,
+            isSelecting: false
+        };
     }
 
     initializeElements() {
@@ -128,10 +137,16 @@ class PCMPlayer {
         // 导出按钮事件
         this.exportButton.addEventListener('click', () => this.exportSelection());
         
-        // 选择区域事件
-        this.waveformCanvas.addEventListener('mousedown', this.handleSelectionStart.bind(this));
-        this.waveformCanvas.addEventListener('mousemove', this.handleSelectionMove.bind(this));
-        this.waveformCanvas.addEventListener('mouseup', this.handleSelectionEnd.bind(this));
+        // 修改选区相关事件监听
+        this.waveformCanvas.addEventListener('contextmenu', (e) => {
+            e.preventDefault(); // 阻止默认右键菜单
+        });
+        this.waveformCanvas.addEventListener('mousedown', this.handleMouseDown.bind(this));
+        this.waveformCanvas.addEventListener('mousemove', this.handleMouseMove.bind(this));
+        this.waveformCanvas.addEventListener('mouseup', this.handleMouseUp.bind(this));
+        
+        // 双击重置视图
+        this.waveformCanvas.addEventListener('dblclick', () => this.resetView());
         
         // 拖放相关事件
         this.setupDragAndDrop();
@@ -291,7 +306,7 @@ class PCMPlayer {
                 `检测到异常采样值：\n` +
                 `- 位深度：${options.bitDepth} bit\n` +
                 `- 有效值范围：${-maxValue} 到 ${maxValue}\n` +
-                `- 发现 ${invalidSamples.length} 个超出范围的样本\n` +
+                `- 发现 ${invalidSamples.length} 个超出范围��样本\n` +
                 `- 前5个异常样本：\n${sampleDetails}\n` +
                 `可能原因：\n` +
                 `1. 文件格式可能不是原始PCM\n` +
@@ -565,60 +580,50 @@ class PCMPlayer {
         const width = this.waveformCanvas.width / (window.devicePixelRatio || 1);
         const height = this.waveformCanvas.height / (window.devicePixelRatio || 1);
         const middleY = height / 2;
-        
-        ctx.clearRect(0, 0, width, height);
+        const padding = 40;
         
         // 绘制坐标轴
         this.drawWaveformAxes(ctx, width, height);
         
-        // 绘制中心线
-        ctx.beginPath();
-        ctx.strokeStyle = '#ddd';
-        ctx.lineWidth = 1;
-        ctx.moveTo(0, middleY);
-        ctx.lineTo(width, middleY);
-        ctx.stroke();
-        
         // 计算可见区域的数据范围
-        const visibleWidth = width / this.zoomLevel;
-        const startX = this.offset;
-        const endX = startX + visibleWidth;
+        const effectiveWidth = width - 2 * padding;
+        const duration = this.audioBuffer.duration;
+        const pixelsPerSecond = effectiveWidth * this.zoomLevel / duration;
         
-        // 计算对应的采样点范围
-        const samplesPerPixel = dataArray.length / width;
-        const startSample = Math.floor(startX * samplesPerPixel);
-        const endSample = Math.ceil(endX * samplesPerPixel);
+        // 计算起始和结束采样点
+        const startSample = Math.floor((this.offset / pixelsPerSecond) * this.audioBuffer.sampleRate);
+        const endSample = Math.floor(((this.offset + effectiveWidth) / pixelsPerSecond) * this.audioBuffer.sampleRate);
         
-        // 绘制可见区域的波形
-        ctx.save();
+        // 绘制波形
         ctx.beginPath();
-        ctx.rect(0, 0, width, height);
-        ctx.clip();
+        ctx.strokeStyle = '#2196F3';
+        ctx.lineWidth = 1;
         
-        const sliceWidth = width / (endSample - startSample);
-        let x = 0;
+        // 计算每个采样点对应的x坐标
+        const samplesInView = endSample - startSample;
+        const pixelsPerSample = effectiveWidth / samplesInView;
         
+        // 绘制所有可见的采样点
         for (let i = startSample; i < endSample; i++) {
-            const v = dataArray[i] || 0;
-            const y = middleY + (v * height / 2);
-            
-            if (i === startSample) {
-                ctx.moveTo(x, y);
-            } else {
-                ctx.lineTo(x, y);
+            if (i >= 0 && i < dataArray.length) {
+                const value = dataArray[i];
+                const x = padding + (i - startSample) * pixelsPerSample;
+                const y = middleY + (value * (height - 2 * padding) / 2);
+                
+                if (i === startSample) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
             }
-            
-            x += sliceWidth;
         }
         
         ctx.stroke();
-        ctx.restore();
         
-        // 绘制选区和标记
+        // 绘制选区
         if (this.selection.start !== this.selection.end) {
             this.drawSelection();
         }
-        this.drawMarkers();
     }
 
     drawWaveformAxes(ctx, width, height) {
@@ -676,7 +681,7 @@ class PCMPlayer {
             const viewStartTime = this.offset / pixelsPerSecond;
             const viewDuration = effectiveWidth / pixelsPerSecond;
             
-            // 计算合适的时间间隔
+            // 计算合适的时间隔
             const timeInterval = this.calculateTimeInterval(viewDuration);
             const firstTickTime = Math.ceil(viewStartTime / timeInterval) * timeInterval;
             
@@ -695,7 +700,7 @@ class PCMPlayer {
         }
     }
 
-    // 新增：计算合适的时��间隔
+    // 新增：计算合适的时间隔
     calculateTimeInterval(duration) {
         const baseIntervals = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5];
         const targetSteps = 10; // 期望的刻度数量
@@ -829,7 +834,7 @@ class PCMPlayer {
         const viewStartTime = this.offset / pixelsPerSecond;
         const viewCenterTime = viewStartTime + (duration / oldZoom / 2);
         
-        // 使用新的缩放级别计算偏移量
+        // 用新的缩放级别计算偏移量
         const newPixelsPerSecond = effectiveWidth * this.zoomLevel / duration;
         const newOffset = (viewCenterTime - (duration / this.zoomLevel / 2)) * newPixelsPerSecond;
         
@@ -843,37 +848,102 @@ class PCMPlayer {
     }
 
     handleSelectionStart(e) {
-        this.isSelecting = true;
+        if (!this.audioBuffer) return;
+        
+        this.selection.isSelecting = true;
+        
         const rect = this.waveformCanvas.getBoundingClientRect();
-        this.selection.start = (e.clientX - rect.left) / rect.width;
-        this.selection.end = this.selection.start;
+        const padding = 40;
+        const mouseX = e.clientX - rect.left - padding;
+        const effectiveWidth = rect.width - 2 * padding;
+        
+        // 计算选择起点的时间
+        const duration = this.audioBuffer.duration;
+        const pixelsPerSecond = effectiveWidth * this.zoomLevel / duration;
+        const viewStartTime = this.offset / pixelsPerSecond;
+        
+        // 计算相对于当前视图的时间位置
+        const relativeTime = (mouseX / effectiveWidth) * (duration / this.zoomLevel);
+        this.selection.startTime = viewStartTime + relativeTime;
+        this.selection.endTime = this.selection.startTime;
+        
+        // 更新选择区域的像素位置
+        this.selection.start = mouseX;
+        this.selection.end = mouseX;
+        
+        // 重绘波形
+        this.drawWaveform(this.audioBuffer.getChannelData(0));
     }
 
     handleSelectionMove(e) {
-        if (!this.isSelecting) return;
+        if (!this.selection.isSelecting || !this.audioBuffer) return;
         
         const rect = this.waveformCanvas.getBoundingClientRect();
-        this.selection.end = (e.clientX - rect.left) / rect.width;
+        const padding = 40;
+        const mouseX = Math.max(0, Math.min(e.clientX - rect.left - padding, rect.width - 2 * padding));
+        const effectiveWidth = rect.width - 2 * padding;
         
-        if (this.audioBuffer) {
-            this.drawWaveform(this.audioBuffer.getChannelData(0));
-        }
+        // 计算选择终点的时间
+        const duration = this.audioBuffer.duration;
+        const pixelsPerSecond = effectiveWidth * this.zoomLevel / duration;
+        const viewStartTime = this.offset / pixelsPerSecond;
+        
+        // 计算相对于当前视图的时间位置
+        const relativeTime = (mouseX / effectiveWidth) * (duration / this.zoomLevel);
+        this.selection.endTime = viewStartTime + relativeTime;
+        this.selection.end = mouseX;
+        
+        // 重绘波形
+        this.drawWaveform(this.audioBuffer.getChannelData(0));
     }
 
     handleSelectionEnd() {
-        this.isSelecting = false;
+        if (this.selection.isSelecting && this.hasValidSelection()) {
+            // 如果有有效选区，直接放大
+            this.zoomToSelection();
+        }
+        this.selection.isSelecting = false;
     }
 
     drawSelection() {
+        if (!this.hasValidSelection()) return;
+        
         const ctx = this.waveformCtx;
-        const width = this.waveformCanvas.width;
-        const height = this.waveformCanvas.height;
+        const width = this.waveformCanvas.width / (window.devicePixelRatio || 1);
+        const height = this.waveformCanvas.height / (window.devicePixelRatio || 1);
+        const padding = 40;
         
-        const startX = Math.min(this.selection.start, this.selection.end) * width;
-        const endX = Math.max(this.selection.start, this.selection.end) * width;
+        // 直接使用像素位置绘制选区
+        const startX = padding + Math.min(this.selection.start, this.selection.end);
+        const endX = padding + Math.max(this.selection.start, this.selection.end);
         
+        // 绘制选区背景
         ctx.fillStyle = 'rgba(33, 150, 243, 0.2)';
-        ctx.fillRect(startX, 0, endX - startX, height);
+        ctx.fillRect(startX, padding, endX - startX, height - 2 * padding);
+        
+        // 绘制选区边界
+        ctx.strokeStyle = 'rgba(33, 150, 243, 0.8)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        ctx.moveTo(startX, padding);
+        ctx.lineTo(startX, height - padding);
+        ctx.moveTo(endX, padding);
+        ctx.lineTo(endX, height - padding);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        
+        // 显示选区时间范围
+        const duration = Math.abs(this.selection.endTime - this.selection.startTime);
+        const durationText = `选区: ${duration.toFixed(3)}s`;
+        
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(startX, padding - 20, ctx.measureText(durationText).width + 10, 20);
+        
+        ctx.fillStyle = 'white';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(durationText, startX + 5, padding - 2);
     }
 
     addMarker(position, label) {
@@ -983,7 +1053,7 @@ class PCMPlayer {
         
         // 检查文件类型（可选）
         if (!file.name.toLowerCase().endsWith('.pcm')) {
-            alert('请选择 PCM 文件');
+            alert('请选择 PCM ���件');
             return;
         }
         
@@ -1119,7 +1189,7 @@ class PCMPlayer {
             const newZoom = this.zoomAnimation.start + (this.zoomAnimation.end - this.zoomAnimation.start) * easeProgress;
             this.zoomLevel = newZoom;
             
-            // 更新偏移量以保持固定点不变
+            // 更新偏移量以保持固定不变
             const effectiveWidth = this.waveformCanvas.width - 80;
             const duration = this.audioBuffer.duration;
             const pixelsPerSecond = effectiveWidth * newZoom / duration;
@@ -1281,6 +1351,164 @@ class PCMPlayer {
         }).catch(err => {
             console.error('频谱分析错误:', err);
         });
+    }
+
+    // 检查是否有有效的选区
+    hasValidSelection() {
+        return this.audioBuffer && 
+               Math.abs(this.selection.endTime - this.selection.startTime) > 0.001; // 至少1ms的选区
+    }
+
+    // 添加放大到选区的方法
+    zoomToSelection() {
+        if (!this.hasValidSelection()) return;
+        
+        // 计算选区的时间范围
+        const startTime = Math.min(this.selection.startTime, this.selection.endTime);
+        const endTime = Math.max(this.selection.startTime, this.selection.endTime);
+        const selectionDuration = endTime - startTime;
+        const centerTime = (startTime + endTime) / 2;
+        
+        // 计算需要的缩放级别
+        const effectiveWidth = this.waveformCanvas.width / (window.devicePixelRatio || 1) - 80;
+        const duration = this.audioBuffer.duration;
+        const targetZoom = (duration / selectionDuration) * 0.9;
+        const newZoom = Math.min(50, Math.max(1, targetZoom));
+        
+        // 计算新的偏移量，使选区居中显示
+        const pixelsPerSecond = effectiveWidth * newZoom / duration;
+        const newOffset = Math.max(0, (centerTime - (duration / newZoom / 2)) * pixelsPerSecond);
+        
+        // 设置新的缩放级别和偏移量
+        this.zoomLevel = newZoom;
+        this.offset = newOffset;
+        
+        // 重绘波形
+        this.drawWaveform(this.audioBuffer.getChannelData(0));
+        this.updateZoomDisplay();
+        
+        // 清除选区
+        this.clearSelection();
+    }
+
+    // 添加清除选区的方法
+    clearSelection() {
+        this.selection = {
+            start: 0,
+            end: 0,
+            startTime: 0,
+            endTime: 0,
+            isSelecting: false
+        };
+    }
+
+    // 添加鼠标按下处理方法
+    handleMouseDown(e) {
+        if (e.button === 2) { // 右键
+            // 开始选区
+            this.startSelection(e);
+        } else if (e.button === 0) { // 左键
+            // 开始拖动
+            this.handleDragStart(e);
+        }
+    }
+
+    // 添加鼠标移动处理方法
+    handleMouseMove(e) {
+        if (this.selection.isSelecting) {
+            this.updateSelection(e);
+        } else if (this.dragState.isDragging) {
+            this.handleDragMove(e);
+        }
+    }
+
+    // 添加鼠标松开处理方法
+    handleMouseUp(e) {
+        if (e.button === 2 && this.selection.isSelecting) {
+            this.endSelection();
+        } else if (e.button === 0 && this.dragState.isDragging) {
+            this.handleDragEnd();
+        }
+    }
+
+    // 开始选区
+    startSelection(e) {
+        if (!this.audioBuffer) return;
+        
+        this.selection.isSelecting = true;
+        
+        const rect = this.waveformCanvas.getBoundingClientRect();
+        const padding = 40;
+        const mouseX = e.clientX - rect.left - padding;
+        const effectiveWidth = rect.width - 2 * padding;
+        
+        // 计算选择起点的时间
+        const duration = this.audioBuffer.duration;
+        const pixelsPerSecond = effectiveWidth * this.zoomLevel / duration;
+        const viewStartTime = this.offset / pixelsPerSecond;
+        
+        // 计算相对于当前视图的时间位置
+        const relativeTime = (mouseX / effectiveWidth) * (duration / this.zoomLevel);
+        this.selection.startTime = viewStartTime + relativeTime;
+        this.selection.endTime = this.selection.startTime;
+        
+        // 更新选择区域的像素位置
+        this.selection.start = mouseX;
+        this.selection.end = mouseX;
+        
+        // 重绘波形
+        this.drawWaveform(this.audioBuffer.getChannelData(0));
+    }
+
+    // 更新选区
+    updateSelection(e) {
+        if (!this.selection.isSelecting || !this.audioBuffer) return;
+        
+        const rect = this.waveformCanvas.getBoundingClientRect();
+        const padding = 40;
+        const mouseX = Math.max(0, Math.min(e.clientX - rect.left - padding, rect.width - 2 * padding));
+        const effectiveWidth = rect.width - 2 * padding;
+        
+        // 计算选择终点的时间
+        const duration = this.audioBuffer.duration;
+        const pixelsPerSecond = effectiveWidth * this.zoomLevel / duration;
+        const viewStartTime = this.offset / pixelsPerSecond;
+        
+        // 计算相对于当前视图的时间位置
+        const relativeTime = (mouseX / effectiveWidth) * (duration / this.zoomLevel);
+        this.selection.endTime = viewStartTime + relativeTime;
+        this.selection.end = mouseX;
+        
+        // 重绘波形
+        this.drawWaveform(this.audioBuffer.getChannelData(0));
+    }
+
+    // 结束选区
+    endSelection() {
+        if (this.selection.isSelecting && this.hasValidSelection()) {
+            // 如果有有效选区，直接放大
+            this.zoomToSelection();
+        }
+        this.selection.isSelecting = false;
+    }
+
+    // 修改 resetView 方法
+    resetView() {
+        if (!this.audioBuffer) return;
+        
+        // 重置缩放和偏移
+        this.zoomLevel = 1;
+        this.offset = 0;
+        
+        // 清除选区
+        this.clearSelection();
+        
+        // 重绘波形
+        this.drawWaveform(this.audioBuffer.getChannelData(0));
+        this.updateZoomDisplay();
+        
+        // 更新鼠标样式
+        this.waveformCanvas.style.cursor = 'grab';
     }
 }
 

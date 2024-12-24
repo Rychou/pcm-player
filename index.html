@@ -165,6 +165,32 @@
         .canvas-container {
             position: relative;
         }
+        .selection-hint {
+            position: absolute;
+            right: 10px;
+            bottom: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+        }
+        .canvas-container:hover .selection-hint {
+            opacity: 1;
+        }
+        .zoom-controls button {
+            padding: 5px 10px;
+            margin: 0 2px;
+        }
+        #resetViewButton {
+            background-color: #FF5722;
+        }
+        #resetViewButton:hover:not(:disabled) {
+            background-color: #F4511E;
+        }
     </style>
 </head>
 <body>
@@ -204,6 +230,7 @@
             <div class="zoom-controls">
                 <button id="zoomInButton" disabled>放大</button>
                 <button id="zoomOutButton" disabled>缩小</button>
+                <button id="resetViewButton" disabled>重置视图</button>
             </div>
             <button id="exportButton" disabled>导出选区</button>
         </div>
@@ -222,6 +249,7 @@
             <canvas id="waveformCanvas"></canvas>
             <div class="canvas-title spectrum-title">频谱图</div>
             <canvas id="spectrumCanvas" class="spectrum-canvas"></canvas>
+            <div class="selection-hint">拖动选择区域以放大</div>
         </div>
         <div class="stats-panel">
             <h3>音频统计信息</h3>
